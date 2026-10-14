@@ -1,0 +1,41 @@
+# Variant: app --OTLP--> OTel Collector --> ClickHouse --> Grafana (ClickHouse plugin)
+name: otel-clickhouse
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    environment:
+      - CLICKHOUSE_PASSWORD=otel
+      - CLICKHOUSE_DB=otel   # exporter connects to this db, so it must exist up front
+    ports:
+      - "8123:8123"   # HTTP + SQL UI at http://localhost:8123/play
+      - "9000:9000"   # native protocol
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--password", "otel", "-q", "SELECT 1"]
+      interval: 5s
+      retries: 30
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.120.0
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel-collector.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4337:4317"   # OTLP gRPC
+      - "4338:4318"   # OTLP HTTP  -> OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4338
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+
+  grafana:
+    image: grafana/grafana:11.5.2
+    environment:
+      - GF_INSTALL_PLUGINS=grafana-clickhouse-datasource
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+    volumes:
+      - ./grafana/datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml:ro
+    ports:
+      - "3001:3000"
+    depends_on: [clickhouse]

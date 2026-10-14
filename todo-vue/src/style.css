@@ -1,0 +1,67 @@
+:root {
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --text: #1c2026;
+  --muted: #667085;
+  --border: #e3e6ea;
+  --accent: #3b5bdb;
+  --ok: #2f9e44;
+  --error: #e03131;
+  --running: #f08c00;
+  --queued: #868e96;
+  --skipped: #adb5bd;
+  --shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 1px 3px rgb(16 24 40 / 10%);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111418;
+    --panel: #1a1e24;
+    --text: #e6e8eb;
+    --muted: #98a2b3;
+    --border: #2c323b;
+    --accent: #748ffc;
+    --shadow: 0 1px 3px rgb(0 0 0 / 40%);
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.45 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+button, input, select { font: inherit; color: inherit; }
+button {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button:disabled { opacity: .55; cursor: default; }
+input[type=text], input[type=email], input[type=password], select {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  border-radius: 8px;
+  padding: 7px 10px;
+  min-width: 0;
+}
+input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+a { color: var(--accent); }
+.muted { color: var(--muted); }
+.badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+  background: color-mix(in srgb, var(--c) 14%, transparent); color: var(--c);
+  white-space: nowrap;
+}
+.badge::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--c); }
+.badge.ok { --c: var(--ok); } .badge.error { --c: var(--error); }
+.badge.running { --c: var(--running); } .badge.queued, .badge.pending { --c: var(--queued); }
+.badge.skipped { --c: var(--skipped); }
+.badge.running::before { animation: pulse 1s infinite; }
+@keyframes pulse { 50% { opacity: .25; } }

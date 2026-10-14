@@ -1,0 +1,13 @@
+{
+  "name": "cascade-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "test:api": "playwright test api",
+    "test:ui": "playwright test ui"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.0"
+  }
+}

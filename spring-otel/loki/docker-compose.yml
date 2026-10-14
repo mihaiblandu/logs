@@ -1,0 +1,29 @@
+# Variant: app --OTLP--> OTel Collector --> Loki --> Grafana (logs only)
+name: otel-loki
+services:
+  loki:
+    image: grafana/loki:3.4.2
+    command: ["-config.file=/etc/loki/local-config.yaml"]
+    ports:
+      - "3100:3100"
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.120.0
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel-collector.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4347:4317"   # OTLP gRPC
+      - "4348:4318"   # OTLP HTTP  -> OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4348
+    depends_on: [loki]
+
+  grafana:
+    image: grafana/grafana:11.5.2
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+    volumes:
+      - ./grafana/datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml:ro
+    ports:
+      - "3002:3000"
+    depends_on: [loki]

@@ -1,0 +1,17 @@
+[project]
+name = "django-otel"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.13"
+dependencies = [
+    "django>=6.1.2",
+    "opentelemetry-distro>=0.66b1",
+    "opentelemetry-exporter-otlp-proto-http>=1.45.1",
+    "opentelemetry-instrumentation-django==0.66b1",
+    "opentelemetry-instrumentation-logging==0.66b1",
+    "opentelemetry-instrumentation-requests==0.66b1",
+    "opentelemetry-instrumentation-sqlite3==0.66b1",
+    "opentelemetry-instrumentation-wsgi==0.66b1",
+    "pyjwt>=2.15.1",
+    "requests>=2.34.2",
+]

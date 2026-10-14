@@ -1,0 +1,75 @@
+server:
+  port: 4242
+
+spring:
+  application:
+    name: spring-otel-api
+
+otel:
+  service:
+    name: ${spring.application.name}
+  resource:
+    # attached to every span, metric and log record
+    attributes:
+      deployment.environment.name: ${APP_ENV:local}
+      service.namespace: demo
+      team: observability
+  java:
+    disabled:
+      resource:
+        # no host.* / os.* / process.* on every record: not part of the shared resource standard
+        providers: >-
+          io.opentelemetry.instrumentation.resources.HostResourceProvider,
+          io.opentelemetry.instrumentation.resources.HostIdResourceProvider,
+          io.opentelemetry.instrumentation.resources.OsResourceProvider,
+          io.opentelemetry.instrumentation.resources.ProcessResourceProvider,
+          io.opentelemetry.instrumentation.resources.ProcessRuntimeResourceProvider,
+          io.opentelemetry.instrumentation.resources.ContainerResourceProvider
+  exporter:
+    otlp:
+      protocol: http/protobuf
+      compression: gzip
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}
+  # traces, metrics and logs all go to OTLP (set to "console" to debug locally)
+  traces:
+    exporter: otlp
+  metrics:
+    exporter: otlp
+  logs:
+    exporter: otlp
+  # bigger SDK queues + faster flushes, needed for high-volume runs (/load/logs)
+  blrp:
+    max:
+      queue:
+        size: 200000
+      export:
+        batch:
+          size: 10000
+    schedule:
+      delay: 500
+  bsp:
+    max:
+      queue:
+        size: 50000
+      export:
+        batch:
+          size: 5000
+    schedule:
+      delay: 500
+  instrumentation:
+    logback-appender:
+      experimental:
+        # MDC entries become log record attributes (not "*": that also copies trace_id/span_id,
+        # which the log record already carries)
+        capture-mdc-attributes: "request.id,user.id"
+        # SLF4J addKeyValue(...) pairs become log record attributes
+        capture-key-value-pair-attributes: true
+        # no source class/method/line on log records (not part of the shared log standard)
+        capture-code-attributes: false
+        # thread name/id
+        capture-experimental-attributes: true
+
+logging:
+  pattern:
+    # trace_id / span_id are put in the MDC by the OTel Logback instrumentation
+    console: "%d{HH:mm:ss.SSS} %-5level [%X{trace_id:-},%X{span_id:-}] [req=%X{request.id:-} user=%X{user.id:-}] %logger{20} - %msg %kvp%n"

@@ -1,0 +1,54 @@
+# Variant: app --OTLP--> OTel Collector --> Elasticsearch --> Kibana
+name: otel-elk
+services:
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.1.0
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g
+    ports:
+      - "9200:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s localhost:9200/_cluster/health | grep -qE '\"status\":\"(green|yellow)\"'"]
+      interval: 5s
+      retries: 30
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:9.1.0
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+
+  otel-collector:
+    # EDOT: contrib collector + Elastic components (elastictrace, elasticapm) for the Kibana APM UI
+    image: docker.elastic.co/elastic-agent/elastic-otel-collector:9.1.0
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel-collector.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4327:4317"   # OTLP gRPC
+      - "4328:4318"   # OTLP HTTP  -> OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4328
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      jaeger:
+        condition: service_started
+
+  # trace viewer (Jaeger v2, in-memory storage): http://localhost:16686
+  jaeger:
+    image: jaegertracing/jaeger:2.5.0
+    ports:
+      - "16686:16686"
+
+  # one-shot: creates Kibana data views for logs / traces / metrics
+  kibana-setup:
+    image: curlimages/curl:8.11.1
+    depends_on: [kibana]
+    entrypoint: ["/bin/sh", "/setup.sh"]
+    volumes:
+      - ./kibana-setup.sh:/setup.sh:ro

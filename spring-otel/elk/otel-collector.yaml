@@ -1,0 +1,147 @@
+# Elastic Distribution of OpenTelemetry (EDOT) Collector.
+#   traces  -> Jaeger only (not stored in Elasticsearch)
+#   logs    -> Elasticsearch, one flat JSON document per log record (<service.name>-YYYY.MM.DD), see transform/log-format
+#   metrics -> accepted from the SDKs and dropped: no metrics are stored
+receivers:
+  otlp:
+    protocols:
+      grpc: { endpoint: 0.0.0.0:4317 }
+      http: { endpoint: 0.0.0.0:4318 }
+
+processors:
+  batch:
+    send_batch_size: 1000
+    timeout: 1s
+    send_batch_max_size: 1500
+  # DEBUG and TRACE never reach central storage: only INFO and above are kept
+  filter/no-debug:
+    error_mode: ignore
+    logs:
+      log_record:
+        - severity_number > SEVERITY_NUMBER_UNSPECIFIED and severity_number < SEVERITY_NUMBER_INFO
+  # One telemetry standard for every service, enforced here so all languages look the same
+  # (services set it at the source too; this is the safety net):
+  #  - resource: deployment.environment.name (semconv >= 1.27; deprecated deployment.environment is moved);
+  #    no host.* / os.* / process.* / container.* / telemetry.distro.* / telemetry.auto.version
+  #  - logs: log4j level names (TRACE DEBUG INFO WARN ERROR FATAL), derived from severity_number,
+  #    so "Information"/"info"/"warning" from .NET/PHP/pino all read the same
+  #  - logs: no copies of the trace context, framework noise (ASP.NET scopes, {OriginalFormat},
+  #    ContentRoot/EnvName, Django's `request`/`status_code`), cascade.* or code.* attributes
+  #  - spans: current code.* names (code.file.path, code.line.number, code.function.name)
+  transform/standard:
+    error_mode: ignore
+    trace_statements:
+      - context: resource
+        statements: &resource
+          - set(resource.attributes["deployment.environment.name"], resource.attributes["deployment.environment"]) where resource.attributes["deployment.environment.name"] == nil and resource.attributes["deployment.environment"] != nil
+          - delete_key(resource.attributes, "deployment.environment")
+          - delete_matching_keys(resource.attributes, "^(host|os|process|container)\\.|^telemetry\\.(distro|auto)\\.")
+      - context: span
+        statements:
+          - set(span.attributes["code.function.name"], Concat([span.attributes["code.namespace"], span.attributes["code.function"]], ".")) where span.attributes["code.function"] != nil and span.attributes["code.namespace"] != nil
+          - delete_key(span.attributes, "code.function")
+          - delete_key(span.attributes, "code.namespace")
+    log_statements:
+      - context: resource
+        statements: *resource
+      - context: log
+        statements:
+          - set(log.severity_text, "TRACE") where log.severity_number >= 1 and log.severity_number <= 4
+          - set(log.severity_text, "DEBUG") where log.severity_number >= 5 and log.severity_number <= 8
+          - set(log.severity_text, "INFO") where log.severity_number >= 9 and log.severity_number <= 12
+          - set(log.severity_text, "WARN") where log.severity_number >= 13 and log.severity_number <= 16
+          - set(log.severity_text, "ERROR") where log.severity_number >= 17 and log.severity_number <= 20
+          - set(log.severity_text, "FATAL") where log.severity_number >= 21 and log.severity_number <= 24
+          # trace context copied by log bridges: Logback MDC, Python log correlation, .NET scopes
+          - delete_matching_keys(log.attributes, "^(trace_id|span_id|trace_flags|otelTraceID|otelSpanID|otelTraceSampled|otelServiceName|TraceId|SpanId|ParentId)$")
+          - delete_matching_keys(log.attributes, "^(ConnectionId|RequestId|RequestPath|\\{OriginalFormat\\}|ContentRoot|EnvName|request|status_code)$")
+          - delete_matching_keys(log.attributes, "^(cascade|code)\\.")
+
+  # Every log record becomes one flat JSON document (the structured-log shape from
+  # https://opentelemetry.io/docs/concepts/signals/logs/), stored as-is (exporter mapping bodymap):
+  #   timestamp, level, logger, service, environment, message, trace_id, span_id,
+  #   context {userId, username, sub (OAuth2 JWT only), ipAddress},
+  #   request {method, url, body}, response {statusCode, body},
+  #   tags {the record's own key/values, e.g. echo.message, downstream.status, todo.id}
+  # Not repeated here (already in the trace, Jaeger): request id, duration, user agent, headers.
+  # logger: the OTel instrumentation scope (= logger name: class / module / category), or log.logger
+  # when the service sets it (Node, Laravel: their scope is the bridge library). Keys without a value are
+  # left out. Bodies (JSON, <= 4 KB, captured by the services) get secrets masked: "password": "******".
+  # Index: <service.name>-YYYY.MM.DD (UTC day of the record), e.g. spring-otel-api-2026.10.12.
+  transform/log-format:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          - set(log.cache["timestamp"], FormatTime(log.time, "%Y-%m-%dT%H:%M:%S.%fZ"))
+          # PHP's Monolog bridge leaves the record time empty: use the time it was observed
+          - set(log.cache["timestamp"], FormatTime(log.observed_time, "%Y-%m-%dT%H:%M:%S.%fZ")) where log.time_unix_nano == 0
+          - set(log.cache["level"], log.severity_text)
+          - set(log.cache["logger"], instrumentation_scope.name) where instrumentation_scope.name != ""
+          - set(log.cache["logger"], log.attributes["log.logger"]) where log.attributes["log.logger"] != nil
+          - set(log.cache["service"], resource.attributes["service.name"])
+          - set(log.cache["environment"], resource.attributes["deployment.environment.name"])
+          - set(log.cache["message"], log.body)
+          - set(log.cache["trace_id"], log.trace_id.string) where log.trace_id.string != "00000000000000000000000000000000"
+          - set(log.cache["span_id"], log.span_id.string) where log.span_id.string != "0000000000000000"
+          - set(log.cache["context"], {})
+          - set(log.cache["context"]["userId"], log.attributes["user.id"]) where log.attributes["user.id"] != nil
+          - set(log.cache["context"]["username"], log.attributes["user.name"]) where log.attributes["user.name"] != nil and log.attributes["user.name"] != ""
+          - set(log.cache["context"]["sub"], log.attributes["user.sub"]) where log.attributes["user.sub"] != nil and log.attributes["user.sub"] != ""
+          - set(log.cache["context"]["ipAddress"], log.attributes["client.address"]) where log.attributes["client.address"] != nil and log.attributes["client.address"] != ""
+          - delete_key(log.cache, "context") where Len(log.cache["context"]) == 0
+          # request / response only on the per-request log
+          - set(log.cache["request"], {}) where log.attributes["http.request.method"] != nil
+          - set(log.cache["request"]["method"], log.attributes["http.request.method"]) where log.attributes["http.request.method"] != nil
+          - set(log.cache["request"]["url"], log.attributes["url.path"]) where log.attributes["http.request.method"] != nil and log.attributes["url.path"] != nil
+          - set(log.cache["request"]["body"], ParseJSON(log.attributes["http.request.body"])) where log.attributes["http.request.method"] != nil and log.attributes["http.request.body"] != nil and IsMatch(log.attributes["http.request.body"], "^\\s*\\{")
+          - set(log.cache["response"], {}) where log.attributes["http.response.status_code"] != nil and log.attributes["http.request.method"] != nil
+          - set(log.cache["response"]["statusCode"], Int(log.attributes["http.response.status_code"])) where log.attributes["http.response.status_code"] != nil and log.attributes["http.request.method"] != nil
+          - set(log.cache["response"]["body"], ParseJSON(log.attributes["http.response.body"])) where log.attributes["http.request.method"] != nil and log.attributes["http.response.body"] != nil and IsMatch(log.attributes["http.response.body"], "^\\s*\\{")
+          # secrets in bodies (top-level JSON keys)
+          - set(log.cache["request"]["body"]["password"], "******") where log.cache["request"]["body"]["password"] != nil
+          - set(log.cache["request"]["body"]["token"], "******") where log.cache["request"]["body"]["token"] != nil
+          - set(log.cache["request"]["body"]["secret"], "******") where log.cache["request"]["body"]["secret"] != nil
+          - set(log.cache["response"]["body"]["token"], "******") where log.cache["response"]["body"]["token"] != nil
+          - set(log.cache["response"]["body"]["access_token"], "******") where log.cache["response"]["body"]["access_token"] != nil
+          - set(log.cache["response"]["body"]["password"], "******") where log.cache["response"]["body"]["password"] != nil
+          # trace ids in a response body repeat the log's own trace_id / span_id
+          - delete_key(log.cache["response"]["body"], "trace_id") where log.cache["response"]["body"] != nil
+          - delete_key(log.cache["response"]["body"], "span_id") where log.cache["response"]["body"] != nil
+          # tags: whatever the record carries besides the fields above
+          - delete_matching_keys(log.attributes, "^(log\\.logger|request\\.id|user\\.id|user\\.name|user\\.sub|client\\.address|user_agent\\.original|http\\.request\\.method|http\\.route|url\\.path|http\\.response\\.status_code|http\\.server\\.request\\.duration|http\\.request\\.header\\..*|http\\.request\\.body|http\\.response\\.body)$")
+          - set(log.cache["tags"], {})
+          - merge_maps(log.cache["tags"], log.attributes, "insert")
+          - delete_key(log.cache, "tags") where Len(log.cache["tags"]) == 0
+          - set(log.body, log.cache)
+          # routing only: bodymap stores just the body
+          - set(log.attributes["elasticsearch.index"], Concat([ToLowerCase(resource.attributes["service.name"]), FormatTime(log.time, "%Y.%m.%d")], "-")) where log.time_unix_nano != 0
+          - set(log.attributes["elasticsearch.index"], Concat([ToLowerCase(resource.attributes["service.name"]), FormatTime(log.observed_time, "%Y.%m.%d")], "-")) where log.time_unix_nano == 0
+
+exporters:
+  # Jaeger UI (http://localhost:16686): traces only, in memory
+  otlp/jaeger:
+    endpoint: jaeger:4317
+    tls: { insecure: true }
+  # the log body (a map) is the whole document
+  elasticsearch/logs:
+    endpoints: [http://elasticsearch:9200]
+    mapping:
+      mode: bodymap
+    flush: { interval: 1s }
+  nop: {}
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch, transform/standard]
+      exporters: [otlp/jaeger]
+    logs:
+      receivers: [otlp]
+      processors: [filter/no-debug, batch, transform/standard, transform/log-format]
+      exporters: [elasticsearch/logs]
+    # the SDKs still export metrics; accept and drop them (nothing is stored)
+    metrics:
+      receivers: [otlp]
+      exporters: [nop]

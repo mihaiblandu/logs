@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+vendor/
+.venv/
+venv/
+
+# Build output
+target/
+bin/
+obj/
+dist/
+__pycache__/
+*.pyc
+go-otel/go-otel
+spring-otel/signoz/.bin/
+
+# Secrets / local env
+.env
+!.env.example
+
+# Logs & caches
+*.log
+.phpunit.result.cache
+.DS_Store
