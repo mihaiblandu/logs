@@ -67,8 +67,9 @@ Fiecare fișier se poate citi separat; ordinea de mai jos merge de la „ce e un
   - [7.6 De reținut pentru alt proiect](07-implementare-in-proiect.md#76-de-reținut-pentru-alt-proiect)
 <!-- /cuprins -->
 
-Vezi și [`../traces-logs-telemetrie.md`](../traces-logs-telemetrie.md) (diferențele dintre traces, logs și
-telemetrie, pe scurt) și [`../README.md`](../README.md) (cum pornești proiectul).
+Vezi și [`traces-logs-telemetrie.md`](https://github.com/mihaiblandu/logs/blob/main/traces-logs-telemetrie.md)
+(diferențele dintre traces, logs și telemetrie, pe scurt) și
+[`README.md`](https://github.com/mihaiblandu/logs#readme) (cum pornești proiectul).
 
 ## Pe scurt
 
