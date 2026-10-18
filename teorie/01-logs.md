@@ -36,16 +36,45 @@ limbaj și se strică la prima schimbare de mesaj.
   "level": "INFO",
   "logger": "api.views",
   "service": "django-otel-api",
-  "message": "downstream call finished",
+  "environment": "local",
+  "message": "request completed",
   "trace_id": "7a5d280974c77232622d8caf7797aef3",
   "span_id": "6511974e39b6d35c",
-  "context": { "userId": "johndoe" },
-  "tags": { "downstream.url": "http://localhost:5050", "downstream.status": 200 }
+  "context": { "userId": "johndoe", "ipAddress": "::1" },
+  "request": { "method": "GET", "url": "/api/v1/users" },
+  "response": { "statusCode": 200 }
 }
 ```
 
-Avantaje: poți filtra direct (`tags.downstream.status >= 500`), agrega (câte erori pe serviciu), corela
-(`trace_id`) — fără parsare. **Regula de bază: logurile se scriu structurat.**
+Când cererea eșuează, același document, cu `level` și detaliile în `response` (nu un câmp separat
+`error` / `stack_trace` — stack-ul e pe span, în Jaeger):
+
+```json
+{
+  "timestamp": "2026-10-11T19:25:51.102Z",
+  "level": "ERROR",
+  "logger": "api.views",
+  "service": "django-otel-api",
+  "environment": "local",
+  "message": "request completed",
+  "trace_id": "7a5d280974c77232622d8caf7797aef3",
+  "span_id": "6511974e39b6d35c",
+  "context": { "userId": "johndoe", "ipAddress": "::1" },
+  "request": { "method": "GET", "url": "/echo" },
+  "response": { "statusCode": 500, "body": { "error": "internal error" } }
+  // cand este o eroare, se adauga in response corpul erorii care are ca si cheie error si valoarea este mesajul de eșec formatat in json 
+  "error": { "message": "internal error", "stack_trace": "..." }
+  
+}
+```
+
+4xx → `WARN` (ex. 401, 404); 5xx → `ERROR`. Un log al aplicației pentru aceeași eroare păstrează
+câmpurile proprii în `tags` (`{ "echo.message": "x" }`), tot cu același `trace_id`.
+
+Avantaje: poți filtra direct (`response.statusCode >= 500`, `level:ERROR`), agrega (câte erori pe
+serviciu), corela (`trace_id`) — fără parsare. **Regula de bază: logurile se scriu structurat.**
+Cheile fără valoare se omit (`tags` doar dacă logul are câmpuri proprii; `request`/`response` doar
+pe „request completed").
 
 ## 1.2 Anatomia unui log
 
@@ -57,11 +86,16 @@ Avantaje: poți filtra direct (`tags.downstream.status >= 500`), agrega (câte e
 | service / environment | din ce aplicație și mediu | `go-otel-api`, `local` |
 | message | ce s-a întâmplat, scurt și stabil | `request completed` |
 | trace_id / span_id | legătura cu trace-ul cererii | `7a5d…`, `6511…` |
-| context | cine (utilizator, IP) | `{ "userId": "1" }` |
-| câmpuri proprii (tags) | detaliile evenimentului | `{ "todo.id": 51 }` |
+| context | cine (utilizator, IP) | `{ "userId": "1", "ipAddress": "::1" }` |
+| request | metoda și URL-ul (doar pe „request completed") | `{ "method": "GET", "url": "/echo" }` |
+| response | status + corp mic; la eroare, mesajul de eșec | `{ "statusCode": 500, "body": { "error": "internal error" } }` |
+| tags | câmpuri proprii, opțional | `{ "echo.message": "x" }` |
 
 **Mesajul trebuie să fie constant** („request completed"), iar valorile variabile merg în câmpuri. Așa
 poți număra evenimentele de același tip și poți căuta după valori.
+
+`request` și `response` nu țin user-agent, header-e, request id sau durată: acelea sunt deja în trace.
+Corpurile, dacă există, sunt JSON mic (în proiect, ≤ 4 KB).
 
 ## 1.3 Niveluri de severitate (modelul log4j)
 
@@ -85,9 +119,10 @@ aruncă, deci în Elasticsearch / OpenSearch există doar `INFO`, `WARN`, `ERROR
 
 - **secrete**: parole, tokenuri JWT, chei API, `Authorization`, cookie-uri de sesiune
 - **date personale inutile** (GDPR): CNP, carduri, adrese complete; e-mailul doar dacă e nevoie reală
-- **corpuri mari** de cereri/răspunsuri (cost + risc); dacă da, doar JSON mic și cu secretele mascate
-  (`"password": "******"`)
-- **date redundante**: ce se află deja în trace (durata, user agent) sau e identic pe toate logurile
+- **corpuri mari** de cereri/răspunsuri: Elasticsearch nu le indexează bine (eșec de indexare) și
+  indexarea e scumpă; dacă da, doar JSON mic, cu secretele mascate (`"password": "******"`)
+- **date redundante**: ce se află deja în trace (durata, user agent, request id, header-e) sau e identic
+  pe toate logurile
 
 ## 1.5 Bune practici
 
@@ -99,7 +134,8 @@ aruncă, deci în Elasticsearch / OpenSearch există doar `INFO`, `WARN`, `ERROR
 6. Mesaje constante, valori în câmpuri.
 7. Niveluri folosite consecvent; `ERROR` doar pentru eșecuri reale (altfel alertele devin zgomot).
 8. Fără secrete și fără zgomot de framework.
-9. Logul pleacă din aplicație fără să o blocheze (buffer + trimitere asincronă).
+9. Logul pleacă din aplicație fără să o blocheze: buffer + trimitere asincronă către un collector,
+   nu scriere directă în stocare.
 
 ## 1.6 Unde scrie aplicația logurile
 
@@ -108,6 +144,9 @@ aruncă, deci în Elasticsearch / OpenSearch există doar `INFO`, `WARN`, `ERROR
 | fișier | un agent citește fișierul (Filebeat, Fluent Bit) | clasic pe VM-uri; rotație de fișiere |
 | stdout | runtime-ul de containere le preia; un agent le citește | standardul în Docker/Kubernetes (12-factor) |
 | direct prin rețea (OTLP) | SDK-ul OpenTelemetry trimite la un collector | fără parsare, cu `trace_id` pus automat — **varianta din proiect** |
+
+Aplicația nu scrie în Elasticsearch. Collectorul e buffer-ul: primește OTLP, filtrează, normalizează,
+apoi exportă. Așa aplicația nu se blochează dacă stocarea e lentă sau căzută.
 
 <!-- nav -->
 ---

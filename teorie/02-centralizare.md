@@ -162,41 +162,9 @@ Logurile centralizate devin utile când pot fi legate între ele și de trace-ur
 
 Logurile sunt de obicei **cel mai mare volum** de date de observabilitate.
 
-| Fază | Durată tipică | Stocare |
-|------|---------------|---------|
-| hot | 1–7 zile | SSD, căutare rapidă |
-| warm | 7–30 zile | disc mai ieftin, mai puține replici |
-| cold / arhivă | luni – ani (audit) | snapshot în S3, căutare rară |
-| delete | după politică | — |
-
-Cum reduci costul:
-
-- loghezi **ce folosești**: `DEBUG` / `TRACE` nu ajung niciodată în stocarea centrală (filtrate în collector), fără loguri pe fiecare iterație;
-- un log de cerere (`request completed`) în loc de cinci;
-- fără câmpuri redundante (durata și header-ele sunt deja în trace);
-- corpuri limitate (≤ 4 KB) și doar JSON;
-- retenție diferită pe index (`vama-*` 1 an pentru audit, aplicații interne 30 zile); cu index zilnic, retenția = ștergi zilele vechi;
-- **eșantionare**: normală la trace-uri, rară la loguri (pierzi exact eroarea care contează).
-
 ## 2.9 Fiabilitate
 
 - **batch + retry** în collector (`batch`, `retry_on_failure`, `sending_queue`): stocarea poate fi indisponibilă câteva minute fără să pierzi date;
-- **backpressure**: `memory_limiter` în collector, ca un vârf să nu-l oprească;
-- **buffer** (Kafka) la volume mari sau când stocarea e în altă regiune;
-- **logul nu blochează aplicația**: exportul e asincron; dacă nu se poate trimite, se pierde logul, nu cererea;
-- **monitorizează pipeline-ul**: rata de loguri pe serviciu; o scădere bruscă = colectare stricată.
-
-## 2.10 Alertare și utilizare
-
-| Alertă | Interogare (Kibana / KQL) |
-|--------|---------------------------|
-| erori pe serviciu | `level:ERROR and service:"go-otel-api"` > N în 5 min |
-| erori de server | `response.statusCode >= 500` |
-| posibil atac | `level:WARN and response.statusCode:401` în rafală de la același `context.ipAddress` |
-| tăcere | 0 loguri de la un serviciu în 10 min |
-
-Utilizare zilnică: Discover cu data view-ul `logs`, filtre pe `service`, `level`, `context.userId`,
-`trace_id`; din log → Jaeger cu același `trace_id`.
 
 ## 2.11 Pași de implementare (checklist)
 
@@ -213,19 +181,6 @@ Utilizare zilnică: Discover cu data view-ul `logs`, filtre pe `service`, `level
 8. **Teste automate** pe format: fiecare serviciu produce exact cheile standardului, fără secrete.
 9. **Documentare**: cum se caută, unde e formatul, cine e responsabil de pipeline.
 
-## 2.12 Anti-pattern-uri
-
-| Greșit | Corect |
-|--------|--------|
-| loguri text libere, parsate cu regex | loguri structurate JSON / OTLP |
-| fiecare serviciu cu alt format și alte niveluri | un standard impus la sursă și în collector |
-| aplicația scrie direct în Elasticsearch | aplicație → collector → stocare |
-| `DEBUG` / `TRACE` trimise în Elasticsearch | doar `INFO`+ centralizat; `DEBUG` rămâne local (consolă), la dezvoltare |
-| parole, tokenuri, carduri în loguri | mascare înainte de stocare |
-| un index uriaș pentru tot, păstrat la nesfârșit | index per aplicație + retenție |
-| mii de indexuri mici (unul pe zi pe serviciu mic) | data streams cu rollover pe mărime |
-| traces, metrici și loguri amestecate în același index | fiecare semnal în backend-ul potrivit |
-| id de corelare inventat în fiecare serviciu | `trace_id` W3C propagat |
 
 ## 2.13 Mai multe domenii și instanțe (SFS, MF, CTIF, Vamă, …)
 
@@ -304,16 +259,6 @@ Reguli:
 Index template-ul rămâne **unul singur** (tipare `sfs-*`, `mf-*`, `ctif-*`, `vama-*`, …), deci toate domeniile au același mapping, iar în
 Kibana un singur data view (aceleași tipare) caută peste tot; filtrezi cu `domain:"vama"`.
 
-### Acces, retenție și volum pe domeniu
-
-| Ce | Cum |
-|----|-----|
-| **acces** | rol per domeniu pe tiparul de index (`sfs-*` doar pentru echipa SFS); Kibana *Spaces* / OpenSearch *tenants* per domeniu; o echipă centrală (operare, securitate) vede tot |
-| **retenție** | politică ILM / ISM per domeniu (de ex. `vama` 1 an pentru audit, `mf` 90 zile) |
-| **volum** | cote / alerte pe rata de loguri per domeniu, ca un domeniu zgomotos să nu-i afecteze pe ceilalți |
-| **izolare** | la cerințe stricte: cluster separat per domeniu, același collector și același standard |
-| **corelare între domenii** | `traceparent` se propagă și între domenii (de ex. Vamă → SFS); `trace_id` e același, deci o cerere se urmărește cap-coadă, chiar dacă fiecare echipă vede doar indexurile ei |
-
 ### Instanțe multiple: ce trebuie să știi
 
 - **nu** scrie loguri în fișiere locale pe instanță ca sursă principală — instanțele apar și dispar
@@ -324,15 +269,6 @@ Kibana un singur data view (aceleași tipare) caută peste tot; filtrezi cu `dom
   gateway-ul poate avea și el mai multe replici în spatele unui load balancer (fără stare);
 - la deploy, `version` + `instance` arată imediat dacă erorile vin doar de la instanțele noi.
 
-## 2.14 În proiect
-
-- 6 servicii trimit OTLP la collectorul EDOT (`:4328`) — modelul **gateway collector**;
-- collectorul aruncă `DEBUG` / `TRACE` (`filter/no-debug`), aplică standardul (`transform/standard`, `transform/log-format`) și scrie documentul plat în
-  indexul zilnic `<service.name>-YYYY.MM.DD` (ex. `spring-otel-api-2026.10.12`); trace-urile merg în Jaeger, metricile sunt aruncate;
-- `spring-otel/elk/kibana-setup.sh` creează index template-ul `app-logs` (tipare `*-otel-api-*`, `*-otel-worker-*`) și data view-ul `logs`;
-- `./purge-all.sh` șterge datele; testele din `e2e/` verifică formatul pentru fiecare serviciu.
-
-<!-- nav -->
 ---
 [← 1. Ce este un log](01-logs.md) · [Cuprins](README.md) · [3. Logs, traces, metrics — cei trei piloni →](03-logs-traces-metrics.md)
 <!-- /nav -->
