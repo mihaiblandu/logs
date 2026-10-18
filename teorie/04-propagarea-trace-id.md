@@ -93,22 +93,6 @@ Atenție: header-ul `traceparent` din răspuns nu e standardizat pentru asta; fo
 **În proiect:** toate cele 6 servicii trimit `X-Trace-Id` (middleware-ul de context: `TelemetryContextFilter`,
 `TelemetryContext`, `middleware.py`, `Program.cs`, `main.go`, `app.js`).
 
-## 4.4 În baza de date / audit log (unde e cazul)
-
-Pentru tranzacții importante, loguri de audit sau erori fatale salvate în DB:
-
-```sql
-ALTER TABLE audit_logs ADD COLUMN trace_id VARCHAR(32);   -- 32 hex, ca în W3C
-CREATE INDEX audit_logs_trace_id ON audit_logs (trace_id);
-```
-
-Tabele potrivite: `audit_logs`, `error_logs`, `system_events`, comenzi/plăți. Permite corelarea directă între o
-înregistrare din DB și logurile / trace-ul din OpenTelemetry. Nu pune `trace_id` peste tot — doar unde chiar
-vei avea nevoie să întrebi „ce cerere a produs rândul ăsta?".
-
-**În proiect:** tabela `todos` are coloana `trace_id` (32 caractere), completată de jobul `RunTodoCascade`;
-API-ul întoarce și `trace_url` → `http://localhost:16686/trace/<trace_id>`, iar UI-ul Vue arată linkurile
-„Trace in Jaeger" și „Logs in Kibana".
 
 ## 4.5 Cum circulă un Trace ID într-o cerere
 
