@@ -21,9 +21,19 @@ curl -H 'X-User-Id: mihai' -H 'X-Request-Id: demo-1' localhost:3005/api/chain
   Node :3005 -> Go :4250 -> Django :8001 -> .NET :5050 -> Laravel :8000 -> Spring :4242
 ```
 
-`./start-all.sh` starts all six against **ELK** (EDOT collector :4328 → Elasticsearch 9 → Kibana
-http://localhost:5601); `OTLP=http://localhost:4318 ./start-all.sh` sends to Grafana LGTM instead. Other
-backends live in `spring-otel/`: ClickHouse (:4338), Loki (:4348), SigNoz (:4358). `./stop-all.sh` stops them.
+All six services send OTLP to one shared **agent collector** (`otel-collector/`, OTLP HTTP :4308 /
+gRPC :4307), which forwards everything to the chosen backend:
+
+```
+6 services --OTLP :4308--> agent collector --OTLP--> backend collector --> storage
+```
+
+`./start-all.sh` starts the agent and all six against **ELK** (EDOT collector :4328 → Elasticsearch 9 →
+Kibana http://localhost:5601); `OTLP=http://localhost:4318 ./start-all.sh` points the agent at Grafana LGTM
+instead - the services don't change. Other backends live in `spring-otel/`: ClickHouse (:4338), Loki (:4348),
+SigNoz (:4358). `SIGNOZ=1 ./start-all.sh` additionally sends a copy of everything to SigNoz
+(http://localhost:8080). `./stop-all.sh` stops the services and the agent. The agent also fixes Laravel's per-request
+PHP metrics (delta → cumulative) for every backend.
 Each service README lists the language-specific gotchas.
 
 ## Cascade todo app (JWT + queue job + Vue Flow)
@@ -48,8 +58,13 @@ cd e2e && npm install && npx playwright install chromium && npx playwright test
                  └─ dotnet ── spring (spring-b)
   ```
 
-  Scenarios: `all-ok`, `fail-django`, `fail-dotnet` (the node fails, its subtree isn't called), `slow`.
-- **Vue app** (`todo-vue/`): login, todo CRUD, and the cascade drawn with Vue Flow (the Vue port of
+  18 scenarios (`GET /api/cascade/plan` lists them with a description): three shapes - the tree above,
+  `chain` (all six in one line: laravel → node → go → django → dotnet → spring) and `wide` (Laravel calls
+  the five others directly) - plus injected failures (`fail-<service>` / `fail-spring-a`: the node fails,
+  its subtree isn't called), slow work (`slow`, `slow-<service>`), `mixed`, `chain-fail-django`,
+  `wide-fail-go` and `chaos` (25% failure per node, drawn on every run).
+- **Vue app** (`todo-vue/`): login, todo CRUD, **Run all scenarios** (one todo per scenario, their status in
+  one row of chips), and the cascade drawn with Vue Flow (the Vue port of
   xyflow) - live status per node, durations on edges, links to the trace in Kibana APM and the logs in Discover.
 - **One trace** from `POST /api/todos` through the queue job and all services; logs from every
   service share its `trace_id` and carry the JWT user.
@@ -94,22 +109,26 @@ Set at the source (OTel SDK config) and enforced by the ELK collector (`spring-o
 - bodies: JSON only, up to 4 KB; `password`, `token`, `secret`, `access_token` are stored as `"******"`
 - keys without a value are left out
 
-**Traces** - OTel model in `traces-<app>.otel-default` (span events are not stored in Elasticsearch) and
-**Jaeger** (in-memory, http://localhost:16686, span events included). Resource: `service.name` (`<app>-otel-api`),
+**Traces** - Elasticsearch in the OTel model, data stream `traces-<app>.otel-default` (e.g. `traces-spring.otel-default`;
+span events are not stored there), and **Jaeger** (in-memory, http://localhost:16686, span events included). Resource: `service.name` (`<app>-otel-api`),
 `service.namespace=demo`, `service.version`, `service.instance.id`, `deployment.environment.name=local`,
 `team=observability`, `telemetry.sdk.*`. Stable HTTP semconv.
 
-**Metrics** - none stored (the collector accepts and drops them).
+**Metrics** - Elasticsearch in the OTel model, data stream `metrics-<app>.otel-default`.
 
-Kibana data views: `logs` (`*-otel-api-*,*-otel-worker-*`), `otel-traces`. `./purge-all.sh` deletes all
+**Text search** - `message` is analyzed `text` (full-text: `message:completed`), with `message.keyword` for exact
+match and aggregations; every other string (`context.*`, `tags.*`, bodies) is a `keyword` with a `.text`
+(`match_only_text`) subfield for full-text search.
+
+Kibana data views: `logs` (`*-otel-api-*,*-otel-worker-*`), `otel-traces` (`traces-*.otel-*`), `otel-metrics` (`metrics-*.otel-*`). `./purge-all.sh` deletes all
 telemetry (Elasticsearch + Jaeger).
 
 Tests: `cd e2e && npx playwright test` (199 tests: `/echo` contract, JWT, cascade, telemetry standard,
 log format, Jaeger, UI).
 
 ### ELK notes
-- The collector is Elastic's **EDOT** image. No metrics are stored, so the Kibana APM *Services* list
-  stays empty; open traces in Jaeger, Discover (`otel-traces`) or the Vue app's links.
+- The collector is Elastic's **EDOT** image. Traces and metrics are stored in the OTel model; open traces in
+  Jaeger, Discover (`otel-traces`) or the Vue app's links.
 - Kibana's **service map** needs a Platinum/trial license; the Vue Flow graph shows the same topology.
 - The queue worker uses `OTEL_TRACES_SAMPLER=parentbased_always_off`: jobs keep their dispatcher's
   trace, while the `queue:work` polling loop (a new root span every 0.2s, ~2k spans/15 min) is dropped.

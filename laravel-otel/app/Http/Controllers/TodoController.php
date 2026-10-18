@@ -76,7 +76,11 @@ class TodoController extends Controller
                 'children' => array_map($strip, $node['children'])];
         };
 
-        return response()->json(['scenarios' => CascadePlan::SCENARIOS, 'plan' => $strip(CascadePlan::build($scenario))]);
+        return response()->json([
+            'scenarios' => CascadePlan::SCENARIOS,
+            'descriptions' => CascadePlan::DESCRIPTIONS,
+            'plan' => $strip(CascadePlan::build($scenario, preview: true)),
+        ]);
     }
 
     private function dispatchCascade(Todo $todo): void
@@ -97,7 +101,7 @@ class TodoController extends Controller
         $jaeger = rtrim(config('demo.jaeger_url'), '/');
 
         return $todo->only('id', 'title', 'done', 'scenario', 'cascade_status', 'trace_id', 'cascade', 'created_at') + [
-            // traces are stored only in Jaeger
+            // Jaeger shows span events too (Elasticsearch stores the spans without them)
             'trace_url' => $todo->trace_id ? "{$jaeger}/trace/{$todo->trace_id}" : null,
         ];
     }

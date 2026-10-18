@@ -23,7 +23,7 @@ import (
 )
 
 // setupOTel wires traces, metrics and logs to OTLP/HTTP. Endpoint comes from
-// OTEL_EXPORTER_OTLP_ENDPOINT (default http://localhost:4318).
+// OTEL_EXPORTER_OTLP_ENDPOINT (start-all.sh: the agent collector, http://localhost:4308).
 func setupOTel(ctx context.Context) (func(context.Context) error, error) {
 	// schemaless: merging with resource.Default() panics if the semconv schema versions differ
 	res, err := resource.Merge(resource.Default(), resource.NewSchemaless(

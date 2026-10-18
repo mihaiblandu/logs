@@ -1,5 +1,5 @@
 // Loaded with `node --require ./instrumentation.js` so instrumentations patch modules before the app
-// requires them. Endpoint from OTEL_EXPORTER_OTLP_ENDPOINT (default http://localhost:4318).
+// requires them. Endpoint from OTEL_EXPORTER_OTLP_ENDPOINT (start-all.sh: the agent collector, http://localhost:4308).
 const { NodeSDK } = require('@opentelemetry/sdk-node');
 const { getNodeAutoInstrumentations } = require('@opentelemetry/auto-instrumentations-node');
 const { OTLPTraceExporter } = require('@opentelemetry/exporter-trace-otlp-proto');

@@ -1,0 +1,11 @@
+# Optional overlay (SIGNOZ=1 ./start-all.sh): also send everything to SigNoz (UI http://localhost:8080),
+# next to the main backend. Merged over otel-collector.yaml; the pipeline exporter lists are replaced.
+exporters:
+  otlphttp/signoz:
+    endpoint: http://host.docker.internal:4358
+
+service:
+  pipelines:
+    traces:  { exporters: [otlphttp, otlphttp/signoz] }
+    logs:    { exporters: [otlphttp, otlphttp/signoz] }
+    metrics: { exporters: [otlphttp, otlphttp/signoz] }

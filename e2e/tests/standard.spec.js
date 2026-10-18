@@ -4,7 +4,8 @@ import { APPS, LOG4J_LEVELS, SERVICES, callUntilOk, count, jaegerFind, jaegerTra
 // The telemetry standard (enforced at the source and by the ELK collector), checked in Elasticsearch
 // for every service. One request through the whole chain gives each service spans and logs that carry
 // the same request.id / user.id (propagated as baggage).
-//   spans: Jaeger only (not stored in Elasticsearch)
+//   spans: Jaeger (with events) and traces-<app>.otel-default (OTel model, no span events)
+//   metrics: metrics-<app>.otel-default (OTel model)
 //   logs:  <service.name>-YYYY.MM.DD, one flat JSON document per log record:
 //          timestamp, level, logger, service, environment, message, trace_id, span_id,
 //          context {userId, username, sub, ipAddress}, request {method, url, body}, response {statusCode, body}, tags
@@ -179,9 +180,11 @@ for (const { app, service, language, url, echo } of APPS) {
 }
 
 test.describe('index layout', () => {
-  test('traces are not stored in Elasticsearch', async ({ request }) => {
+  test('traces are stored in Elasticsearch in the OTel model, one data stream per app', async ({ request }) => {
     await expect.poll(async () => (await jaegerFind(request, 'node-otel-api', { 'request.id': RID })).length, poll).toBeGreaterThan(0);
-    expect(await count(request, 'traces-*', { term: { 'attributes.request.id': RID } })).toBe(0);
+    await expect.poll(() => count(request, 'traces-*', { term: { trace_id: TRACE } }), poll).toBeGreaterThan(0);
+    const streams = (await (await request.get('http://localhost:9200/_data_stream/traces-*')).json()).data_streams.map((d) => d.name);
+    expect(streams).toEqual(expect.arrayContaining(APPS.map((a) => `traces-${a.app}.otel-default`)));
   });
 
   test('no OTel-format log documents: no logs-* data streams', async ({ request }) => {
@@ -190,9 +193,16 @@ test.describe('index layout', () => {
     expect(streams).toEqual([]);
   });
 
-  test('no metrics are stored', async ({ request }) => {
-    await expect.poll(() => count(request, '*-otel-api-*,*-otel-worker-*', logByRequest), poll).toBeGreaterThan(0);
-    const res = await request.get('http://localhost:9200/_cat/indices/metrics-*?format=json');
-    expect(await res.json()).toEqual([]);
+  test('metrics are stored in Elasticsearch in the OTel model', async ({ request }) => {
+    await expect.poll(async () => {
+      const res = await request.get('http://localhost:9200/_data_stream/metrics-*');
+      return (await res.json()).data_streams.map((d) => d.name).filter((n) => n.endsWith('.otel-default')).length;
+    }, poll).toBeGreaterThan(0);
+  });
+
+  test('log messages are full-text searchable (message: text, message.keyword: exact)', async ({ request }) => {
+    const logs = '*-otel-api-*,*-otel-worker-*';
+    await expect.poll(() => count(request, logs, { bool: { filter: [{ term: { trace_id: TRACE } }, { match: { message: 'COMPLETED request' } }] } }), poll).toBeGreaterThan(0);
+    expect(await count(request, logs, { bool: { filter: [{ term: { trace_id: TRACE } }, { term: { 'message.keyword': 'request completed' } }] } })).toBeGreaterThan(0);
   });
 });

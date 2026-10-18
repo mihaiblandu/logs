@@ -81,3 +81,95 @@ test.describe('cascade started by a Laravel job', () => {
     }, { timeout: 60_000, intervals: [2000] }).toBe('ERROR');
   });
 });
+
+// Every scenario against the real services: which nodes succeed, which fail, which are never called
+// (a failing node does not call its subtree), and how long the slow ones take.
+const CHAIN = ['laravel', 'node', 'go', 'django', 'dotnet', 'spring'];
+const SCENARIOS = {
+  slow: { ok: ALL_NODES, minMs: { laravel: 400, 'spring-a': 400 } },
+  chain: { ok: CHAIN },
+  wide: { ok: CHAIN },
+  'fail-laravel': { error: ['laravel'], missing: ALL_NODES.slice(1) },
+  'fail-node': { ok: ['laravel', 'dotnet', 'spring-b'], error: ['node'], missing: ['go', 'django', 'spring-a'] },
+  'fail-go': { ok: ['laravel', 'node', 'django', 'spring-a', 'dotnet', 'spring-b'], error: ['go'] },
+  'fail-dotnet': { ok: ['laravel', 'node', 'go', 'django', 'spring-a'], error: ['dotnet'], missing: ['spring-b'] },
+  'fail-spring': { ok: ['laravel', 'node', 'go', 'django', 'dotnet'], error: ['spring-a', 'spring-b'] },
+  'fail-spring-a': { ok: ['laravel', 'node', 'go', 'django', 'dotnet', 'spring-b'], error: ['spring-a'] },
+  'slow-node': { ok: ALL_NODES, minMs: { node: 1500 } },
+  'slow-django': { ok: ALL_NODES, minMs: { django: 1500 } },
+  'slow-spring': { ok: ALL_NODES, minMs: { 'spring-a': 1500, 'spring-b': 1500 } },
+  mixed: { ok: ['laravel', 'node', 'django', 'spring-a', 'dotnet', 'spring-b'], error: ['go'], minMs: { dotnet: 1200 } },
+  'chain-fail-django': { ok: ['laravel', 'node', 'go'], error: ['django'], missing: ['dotnet', 'spring'] },
+  'wide-fail-go': { ok: ['laravel', 'node', 'django', 'dotnet', 'spring'], error: ['go'] },
+};
+
+test.describe('scenarios', () => {
+  for (const [scenario, want] of Object.entries(SCENARIOS)) {
+    test(`${scenario}: ok ${(want.ok ?? []).join(',') || '-'} / error ${(want.error ?? []).join(',') || '-'}`, async ({ request }) => {
+      const { token, user } = await login(request);
+      const todo = await runTodo(request, token, `e2e ${scenario} ${Date.now()}`, scenario);
+      const byId = Object.fromEntries(nodes(todo.cascade).map((n) => [n.id, n]));
+
+      expect(todo.cascade_status).toBe(want.error ? 'error' : 'ok');
+      for (const id of want.ok ?? []) expect(byId[id], id).toMatchObject({ status: 'ok', user_id: String(user.id), trace_id: todo.trace_id });
+      for (const id of want.error ?? []) expect(byId[id], id).toMatchObject({ status: 'error', error: `injected failure at ${id}` });
+      for (const id of want.missing ?? []) expect(byId[id], `${id} must not be called`).toBeUndefined();
+      expect(Object.keys(byId).sort()).toEqual([...(want.ok ?? []), ...(want.error ?? [])].sort());
+      for (const [id, ms] of Object.entries(want.minMs ?? {})) expect(byId[id].duration_ms, id).toBeGreaterThanOrEqual(ms);
+
+      // one trace: one "cascade <node>" span per node that ran, failed ones with ERROR status
+      await expect.poll(async () => {
+        const spans = (await jaegerTrace(request, todo.trace_id))?.spans ?? [];
+        const cascade = spans.filter((s) => s.operationName.startsWith('cascade '));
+        return {
+          ran: cascade.map((s) => s.operationName.slice('cascade '.length)).sort(),
+          errors: cascade.filter((s) => tagsOf(s)['otel.status_code'] === 'ERROR').map((s) => s.operationName.slice('cascade '.length)).sort(),
+        };
+      }, { timeout: 60_000, intervals: [2000] }).toEqual({ ran: Object.keys(byId).sort(), errors: [...(want.error ?? [])].sort() });
+    });
+  }
+
+  test('chain: all six services in one line, each the parent of the next', async ({ request }) => {
+    const { token } = await login(request);
+    const todo = await runTodo(request, token, `e2e chain line ${Date.now()}`, 'chain');
+    const line = [];
+    for (let n = todo.cascade; n; n = n.children?.[0]) {
+      expect(n.children.length, n.id).toBeLessThanOrEqual(1);
+      line.push(n.service);
+    }
+    expect(line).toEqual(CHAIN);
+
+    // in the trace every cascade span (except Laravel's) descends from the previous service's span
+    await expect.poll(async () => {
+      const trace = await jaegerTrace(request, todo.trace_id);
+      return servicesOf(trace);
+    }, { timeout: 60_000, intervals: [2000] }).toEqual(expect.arrayContaining(['laravel-otel-worker', 'node-otel-api', 'go-otel-api', 'django-otel-api', 'dotnet-otel-api', 'spring-otel-api']));
+    const trace = await jaegerTrace(request, todo.trace_id);
+    const byId = Object.fromEntries(trace.spans.map((s) => [s.spanID, s]));
+    const ancestorOf = (span, op) => {
+      for (let s = span; s; s = byId[s.references?.find((r) => r.refType === 'CHILD_OF')?.spanID]) if (s.operationName === op) return true;
+      return false;
+    };
+    for (let i = 1; i < CHAIN.length; i++) {
+      const span = trace.spans.find((s) => s.operationName === `cascade ${CHAIN[i]}`);
+      expect(ancestorOf(span, `cascade ${CHAIN[i - 1]}`), `${CHAIN[i - 1]} -> ${CHAIN[i]}`).toBe(true);
+    }
+  });
+
+  test('chaos: every run is a valid cascade (failed nodes have no children)', async ({ request }) => {
+    const { token } = await login(request);
+    const todo = await runTodo(request, token, `e2e chaos ${Date.now()}`, 'chaos');
+    const all = nodes(todo.cascade);
+    expect(todo.cascade_status).toBe(all.some((n) => n.status === 'error') ? 'error' : 'ok');
+    for (const n of all.filter((x) => x.status === 'error')) expect(n.children, n.id).toEqual([]);
+  });
+
+  test('the plan endpoint lists every scenario with a description', async ({ request }) => {
+    const { token } = await login(request);
+    const res = await request.get(`${LARAVEL}/api/cascade/plan?scenario=wide`, { headers: { Authorization: `Bearer ${token}` } });
+    const body = await res.json();
+    expect(body.scenarios).toEqual(expect.arrayContaining(['all-ok', 'fail-django', ...Object.keys(SCENARIOS), 'chaos']));
+    for (const s of body.scenarios) expect(body.descriptions[s], s).toBeTruthy();
+    expect(body.plan.children.map((c) => c.id)).toEqual(['node', 'go', 'django', 'dotnet', 'spring']);
+  });
+});

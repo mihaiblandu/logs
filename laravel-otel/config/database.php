@@ -38,10 +38,14 @@ return [
             'database' => env('DB_DATABASE', database_path('database.sqlite')),
             'prefix' => '',
             'foreign_key_constraints' => env('DB_FOREIGN_KEYS', true),
-            'busy_timeout' => null,
-            'journal_mode' => null,
+            // the app and the queue worker share this file: a busy writer waits up to 5 s instead of
+            // failing with "database is locked", and IMMEDIATE takes the write lock up front (a DEFERRED
+            // read->write upgrade fails at once, ignoring busy_timeout). Not WAL: its shared-memory -shm
+            // file crashes the worker with SIGBUS on a Docker Desktop (macOS) bind mount shared by two containers.
+            'busy_timeout' => 5000,
+            'journal_mode' => 'delete',
             'synchronous' => null,
-            'transaction_mode' => 'DEFERRED',
+            'transaction_mode' => 'IMMEDIATE',
         ],
 
         'mysql' => [

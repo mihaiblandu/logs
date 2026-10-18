@@ -4,7 +4,7 @@ Django 6 REST API under OpenTelemetry auto-instrumentation (`opentelemetry-instr
 same request context as the Spring / Laravel / .NET apps.
 
 ```bash
-./run.sh                                  # :8001, sends to LGTM (:4318); OTEL_EXPORTER_OTLP_ENDPOINT to change
+./run.sh                                  # :8001, sends to the agent collector (:4308); OTEL_EXPORTER_OTLP_ENDPOINT to change
 curl -i -H 'X-User-Id: mihai' -H 'X-Request-Id: demo-1' 'localhost:8001/api/echo?message=hi'
 curl 'localhost:8001/api/orders/5'                       # sqlite query span
 curl -H 'X-User-Id: mihai' 'localhost:8001/api/chain'    # Django -> .NET -> Laravel -> Spring, one trace

@@ -18,16 +18,18 @@ flowchart LR
   subgraph S[6 servicii]
     SP[Spring :4242] & LA[Laravel :8000] & DJ[Django :8001] & DN[.NET :5050] & GO[Go :4250] & NO[Node :3005]
   end
-  S -->|OTLP http :4328<br/>logs, traces, metrics| C[EDOT Collector<br/>spring-otel/elk/otel-collector.yaml]
+  S -->|OTLP http :4308<br/>logs, traces, metrics| A[Agent Collector<br/>otel-collector/otel-collector.yaml]
+  A -->|OTLP http :4328| C[EDOT Collector<br/>spring-otel/elk/otel-collector.yaml]
   C -->|logs: document plat<br/>&lt;service&gt;-YYYY.MM.DD| ES[(Elasticsearch :9200)]
   C -->|traces| J[Jaeger :16686]
-  C -.->|metrics: aruncate| X[nop]
+  C -->|traces, metrics: model OTel<br/>traces-/metrics-&lt;app&gt;.otel-default| ES
   ES --> K[Kibana :5601<br/>data view „logs"]
 ```
 
 - **Logurile** → Elasticsearch, câte un index pe aplicație și pe zi, `[app-name]-[data]`: `spring-otel-api-2026.10.12`, `laravel-otel-worker-2026.10.12`, …
-- **Trace-urile** → doar Jaeger (nu se salvează în Elasticsearch).
-- **Metricile** → collectorul le primește și le aruncă (nu se stochează).
+- **Trace-urile** → Jaeger (cu span events) și Elasticsearch, în modelul OTel: `traces-<app>.otel-default` (fără span events).
+- **Metricile** → Elasticsearch, în modelul OTel: `metrics-<app>.otel-default`.
+- **Căutare text**: `message` e `text` (full-text) + `message.keyword` (exact); restul textelor sunt `keyword` + subcâmp `.text`.
 
 ## 7.2 Formatul unui log
 
