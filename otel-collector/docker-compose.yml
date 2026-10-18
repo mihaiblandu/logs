@@ -5,9 +5,12 @@ name: otel-agent
 services:
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.130.0
-    command: ["--config=/etc/otelcol/config.yaml"]
+    # second config: an overlay merged over the first; AGENT_EXTRA=extra-signoz also sends to SigNoz
+    command: ["--config=/etc/otelcol/config.yaml", "--config=/etc/otelcol/${AGENT_EXTRA:-extra-none}.yaml"]
     volumes:
       - ./otel-collector.yaml:/etc/otelcol/config.yaml:ro
+      - ./extra-none.yaml:/etc/otelcol/extra-none.yaml:ro
+      - ./extra-signoz.yaml:/etc/otelcol/extra-signoz.yaml:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:

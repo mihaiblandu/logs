@@ -35,6 +35,16 @@ watch(() => session.value?.token, (token) => {
   if (token) refresh();
 }, { immediate: true });
 
+// one todo per scenario; the list then shows them all cascading at once
+async function runAll(scenarios) {
+  const stamp = new Date().toLocaleTimeString();
+  await run(async () => {
+    let last;
+    for (const s of scenarios) last = await api.createTodo(`${s} · ${stamp}`, s);
+    return last;
+  });
+}
+
 async function run(action) {
   try {
     const todo = await action();
@@ -66,6 +76,7 @@ async function run(action) {
         :selected-id="selectedId"
         @select="selectedId = $event"
         @create="(title, scenario) => run(() => api.createTodo(title, scenario))"
+        @create-all="runAll"
         @toggle="(t) => run(() => api.updateTodo(t.id, { done: !t.done }))"
         @remove="(t) => run(() => api.deleteTodo(t.id))"
         @rerun="(t, scenario) => run(() => api.rerun(t.id, scenario))"

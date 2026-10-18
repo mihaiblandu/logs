@@ -1,16 +1,28 @@
 <script setup>
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { api } from '../api.js';
 import { STATUS_LABEL } from '../services.js';
 
-defineProps({ todos: Array, selectedId: Number });
-const emit = defineEmits(['select', 'create', 'toggle', 'remove', 'rerun']);
+const props = defineProps({ todos: Array, selectedId: Number });
+const emit = defineEmits(['select', 'create', 'createAll', 'toggle', 'remove', 'rerun']);
 
 const title = ref('');
 const scenario = ref('all-ok');
 const scenarios = ref(['all-ok']);
+const descriptions = ref({});
 onMounted(async () => {
-  try { scenarios.value = (await api.plan('all-ok')).scenarios; } catch { /* keep default */ }
+  try {
+    const plan = await api.plan('all-ok');
+    scenarios.value = plan.scenarios;
+    descriptions.value = plan.descriptions ?? {};
+  } catch { /* keep default */ }
+});
+
+// latest todo per scenario (todos come newest first): one chip per scenario, all in one row
+const latest = computed(() => {
+  const by = {};
+  for (const t of props.todos) by[t.scenario] ??= t;
+  return by;
 });
 
 function submit() {
@@ -29,6 +41,17 @@ function submit() {
       </select>
       <button class="primary">Add</button>
     </form>
+    <p class="muted hint" data-testid="scenario-description">{{ descriptions[scenario] }}</p>
+
+    <div class="run-all">
+      <button title="Create one todo per scenario" @click="emit('createAll', scenarios)">Run all scenarios ({{ scenarios.length }})</button>
+    </div>
+    <div class="strip" aria-label="Scenarios">
+      <button v-for="s in scenarios" :key="s" class="chip" :class="latest[s]?.cascade_status ?? 'none'"
+              :title="descriptions[s]" :data-scenario="s" @click="latest[s] && emit('select', latest[s].id)">
+        <span class="dot" />{{ s }}
+      </button>
+    </div>
 
     <p v-if="!todos.length" class="muted empty">No todos yet. Adding one starts a cascade.</p>
     <ul>
@@ -55,6 +78,15 @@ function submit() {
 .todos { border-right: 1px solid var(--border); overflow: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
 .add { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; }
 .empty { margin: 8px 0; }
+.hint { margin: -4px 0 0; font-size: 12px; min-height: 1em; }
+.run-all { flex: none; }
+.run-all button { width: 100%; }
+.strip { display: flex; flex: none; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; font-size: 11px; white-space: nowrap; border-radius: 999px; }
+.chip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--skipped); }
+.chip.ok .dot { background: var(--ok, #2f9e44); }
+.chip.error .dot { background: var(--error); }
+.chip.queued .dot, .chip.running .dot { background: var(--accent); }
 ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 li {
   display: flex; align-items: center; gap: 10px; padding: 10px 12px; cursor: pointer;

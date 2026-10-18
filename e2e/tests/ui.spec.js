@@ -35,3 +35,36 @@ test('a failing scenario marks the node red and skips its subtree', async ({ pag
   await expect(graph.locator('.node.skipped')).toContainText('spring-b');
   await page.screenshot({ path: 'artifacts/cascade-fail.png', fullPage: true });
 });
+
+test('the scenario description follows the dropdown', async ({ page }) => {
+  await page.getByLabel('Cascade scenario').selectOption('chain');
+  await expect(page.getByTestId('scenario-description')).toContainText('all six services in one line');
+});
+
+test('"Run all scenarios" starts one cascade per scenario, shown in one row', async ({ page }) => {
+  // the scenario list is loaded from the plan endpoint after login
+  const options = page.getByLabel('Cascade scenario').locator('option');
+  await expect.poll(() => options.count()).toBeGreaterThanOrEqual(15);
+  const scenarios = await options.evaluateAll((os) => os.map((o) => o.value));
+
+  const todos = page.locator('section.todos li');
+  const before = await todos.count();
+  await page.getByRole('button', { name: /Run all scenarios/ }).click();
+  await expect(todos).toHaveCount(before + scenarios.length);
+  // every cascade finishes: no todo left queued/running, every chip green (ok) or red (error)
+  await expect(todos.locator('.badge.queued, .badge.running')).toHaveCount(0, { timeout: 110_000 });
+  const strip = page.getByLabel('Scenarios');
+  await expect(strip.locator('.chip.ok, .chip.error')).toHaveCount(scenarios.length);
+  await expect(strip.locator('.chip[data-scenario="all-ok"]')).toHaveClass(/ok/);
+  await expect(strip.locator('.chip[data-scenario="fail-node"]')).toHaveClass(/error/);
+  // the chips are one row
+  const tops = await strip.locator('.chip').evaluateAll((cs) => [...new Set(cs.map((c) => c.offsetTop))]);
+  expect(tops).toHaveLength(1);
+
+  // a chip opens that scenario's graph: the chain is six nodes on one line
+  await strip.locator('.chip[data-scenario="chain"]').click();
+  const graph = page.locator('.vue-flow');
+  await expect(graph.locator('.vue-flow__node')).toHaveCount(6);
+  await expect(graph.locator('.node.ok')).toHaveCount(6);
+  await page.screenshot({ path: 'artifacts/run-all.png', fullPage: true });
+});

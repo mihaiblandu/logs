@@ -86,7 +86,7 @@ export async function count(request, index, query) {
 
 export const randomTraceId = () => [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
 
-// --- Jaeger (traces are stored only there) ---
+// --- Jaeger (traces with span events; Elasticsearch has the same spans without events) ---
 
 /** One trace from Jaeger by id, or undefined while it is not there yet. */
 export async function jaegerTrace(request, traceId) {

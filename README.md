@@ -31,7 +31,8 @@ gRPC :4307), which forwards everything to the chosen backend:
 `./start-all.sh` starts the agent and all six against **ELK** (EDOT collector :4328 → Elasticsearch 9 →
 Kibana http://localhost:5601); `OTLP=http://localhost:4318 ./start-all.sh` points the agent at Grafana LGTM
 instead - the services don't change. Other backends live in `spring-otel/`: ClickHouse (:4338), Loki (:4348),
-SigNoz (:4358). `./stop-all.sh` stops the services and the agent. The agent also fixes Laravel's per-request
+SigNoz (:4358). `SIGNOZ=1 ./start-all.sh` additionally sends a copy of everything to SigNoz
+(http://localhost:8080). `./stop-all.sh` stops the services and the agent. The agent also fixes Laravel's per-request
 PHP metrics (delta → cumulative) for every backend.
 Each service README lists the language-specific gotchas.
 
@@ -57,8 +58,13 @@ cd e2e && npm install && npx playwright install chromium && npx playwright test
                  └─ dotnet ── spring (spring-b)
   ```
 
-  Scenarios: `all-ok`, `fail-django`, `fail-dotnet` (the node fails, its subtree isn't called), `slow`.
-- **Vue app** (`todo-vue/`): login, todo CRUD, and the cascade drawn with Vue Flow (the Vue port of
+  18 scenarios (`GET /api/cascade/plan` lists them with a description): three shapes - the tree above,
+  `chain` (all six in one line: laravel → node → go → django → dotnet → spring) and `wide` (Laravel calls
+  the five others directly) - plus injected failures (`fail-<service>` / `fail-spring-a`: the node fails,
+  its subtree isn't called), slow work (`slow`, `slow-<service>`), `mixed`, `chain-fail-django`,
+  `wide-fail-go` and `chaos` (25% failure per node, drawn on every run).
+- **Vue app** (`todo-vue/`): login, todo CRUD, **Run all scenarios** (one todo per scenario, their status in
+  one row of chips), and the cascade drawn with Vue Flow (the Vue port of
   xyflow) - live status per node, durations on edges, links to the trace in Kibana APM and the logs in Discover.
 - **One trace** from `POST /api/todos` through the queue job and all services; logs from every
   service share its `trace_id` and carry the JWT user.

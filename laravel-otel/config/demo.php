@@ -18,10 +18,16 @@ return [
         'from_laravel' => [
             'node' => env('NODE_URL', 'http://host.docker.internal:3005'),
             'dotnet' => env('DOTNET_URL', 'http://host.docker.internal:5050'),
+            // the "wide" scenarios call every service straight from Laravel
+            'go' => env('GO_URL', 'http://host.docker.internal:4250'),
+            'django' => env('DJANGO_URL', 'http://host.docker.internal:8001'),
+            'spring' => env('SPRING_URL', 'http://host.docker.internal:4242'),
         ],
         'from_host' => [
+            'node' => 'http://localhost:3005',
             'go' => 'http://localhost:4250',
             'django' => 'http://localhost:8001',
+            'dotnet' => 'http://localhost:5050',
             'spring' => 'http://localhost:4242',
         ],
     ],

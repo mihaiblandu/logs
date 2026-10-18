@@ -1,0 +1,2 @@
+# Default overlay: no extra backend (see extra-signoz.yaml).
+extensions: {}
