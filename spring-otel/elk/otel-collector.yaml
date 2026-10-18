@@ -1,7 +1,8 @@
 # Elastic Distribution of OpenTelemetry (EDOT) Collector.
-#   traces  -> Jaeger only (not stored in Elasticsearch)
+#   traces  -> Jaeger (in memory, span events included) and Elasticsearch in the OpenTelemetry model
+#              (data stream traces-<app>.otel-default, without span events)
 #   logs    -> Elasticsearch, one flat JSON document per log record (<service.name>-YYYY.MM.DD), see transform/log-format
-#   metrics -> accepted from the SDKs and dropped: no metrics are stored
+#   metrics -> Elasticsearch in the OpenTelemetry model (data stream metrics-<app>.otel-default)
 receivers:
   otlp:
     protocols:
@@ -41,6 +42,9 @@ processors:
           - set(span.attributes["code.function.name"], Concat([span.attributes["code.namespace"], span.attributes["code.function"]], ".")) where span.attributes["code.function"] != nil and span.attributes["code.namespace"] != nil
           - delete_key(span.attributes, "code.function")
           - delete_key(span.attributes, "code.namespace")
+    metric_statements:
+      - context: resource
+        statements: *resource
     log_statements:
       - context: resource
         statements: *resource
@@ -118,6 +122,25 @@ processors:
           - set(log.attributes["elasticsearch.index"], Concat([ToLowerCase(resource.attributes["service.name"]), FormatTime(log.time, "%Y.%m.%d")], "-")) where log.time_unix_nano != 0
           - set(log.attributes["elasticsearch.index"], Concat([ToLowerCase(resource.attributes["service.name"]), FormatTime(log.observed_time, "%Y.%m.%d")], "-")) where log.time_unix_nano == 0
 
+  # Elasticsearch OTel-model data streams per app: traces-<app>.otel-default, metrics-<app>.otel-default,
+  # where <app> is the service.name prefix (spring-otel-api -> spring; laravel api + worker -> laravel)
+  transform/otel-dataset:
+    error_mode: ignore
+    trace_statements: &dataset
+      - context: resource
+        statements:
+          - set(resource.attributes["data_stream.dataset"], resource.attributes["service.name"])
+          - replace_pattern(resource.attributes["data_stream.dataset"], "^([a-z0-9]+)-.*$$", "$$1")
+    metric_statements: *dataset
+  # the elasticsearch exporter drops cumulative histograms (http.server.request.duration, ...): store deltas
+  cumulativetodelta: {}
+  # span events stay in Jaeger; in Elasticsearch they would become extra documents in logs-* data streams
+  filter/no-span-events:
+    error_mode: ignore
+    traces:
+      spanevent:
+        - 'true'
+
 exporters:
   # Jaeger UI (http://localhost:16686): traces only, in memory
   otlp/jaeger:
@@ -129,7 +152,12 @@ exporters:
     mapping:
       mode: bodymap
     flush: { interval: 1s }
-  nop: {}
+  # traces and metrics in the OpenTelemetry model (Kibana APM / Discover data views otel-traces, otel-metrics)
+  elasticsearch/otel:
+    endpoints: [http://elasticsearch:9200]
+    mapping:
+      mode: otel
+    flush: { interval: 1s }
 
 service:
   pipelines:
@@ -137,11 +165,15 @@ service:
       receivers: [otlp]
       processors: [batch, transform/standard]
       exporters: [otlp/jaeger]
+    traces/elasticsearch:
+      receivers: [otlp]
+      processors: [batch, transform/standard, filter/no-span-events, transform/otel-dataset]
+      exporters: [elasticsearch/otel]
     logs:
       receivers: [otlp]
       processors: [filter/no-debug, batch, transform/standard, transform/log-format]
       exporters: [elasticsearch/logs]
-    # the SDKs still export metrics; accept and drop them (nothing is stored)
     metrics:
       receivers: [otlp]
-      exporters: [nop]
+      processors: [cumulativetodelta, batch, transform/standard, transform/otel-dataset]
+      exporters: [elasticsearch/otel]

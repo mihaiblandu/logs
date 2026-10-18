@@ -5,7 +5,7 @@ OTLP/HTTP), with the same request context as the other services.
 
 ```bash
 npm install
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 npm start          # :3005
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4308 npm start          # :3005
 curl -i -H 'X-User-Id: mihai' -H 'X-Request-Id: demo-1' 'localhost:3005/api/echo?message=hi'
 curl -H 'X-User-Id: mihai' 'localhost:3005/api/chain'   # Node -> Go -> Django -> .NET -> Laravel -> Spring
 ```

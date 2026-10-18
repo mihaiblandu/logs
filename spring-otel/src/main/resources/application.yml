@@ -29,7 +29,7 @@ otel:
     otlp:
       protocol: http/protobuf
       compression: gzip
-      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4308}
   # traces, metrics and logs all go to OTLP (set to "console" to debug locally)
   traces:
     exporter: otlp

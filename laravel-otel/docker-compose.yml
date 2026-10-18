@@ -22,7 +22,8 @@ x-app-env: &app-env
   OTEL_TRACES_EXPORTER: otlp
   OTEL_LOGS_EXPORTER: otlp
   OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
-  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+  # the shared agent collector (../otel-collector), which forwards to the chosen backend
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_AGENT_ENDPOINT:-http://host.docker.internal:4308}
   # Log::info('msg', ['a.b' => 1]) -> attribute a.b instead of one nested "context" attribute
   OTEL_PHP_LARAVEL_LOG_ATTRIBUTES_FLATTEN: "true"
 
@@ -35,7 +36,6 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./database:/app/database   # sqlite file shared with the queue worker
-    depends_on: [otel-collector]
     environment:
       <<: *app-env
       OTEL_SERVICE_NAME: laravel-otel-api
@@ -51,7 +51,7 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./database:/app/database
-    depends_on: [app, otel-collector]
+    depends_on: [app]
     environment:
       <<: *app-env
       OTEL_SERVICE_NAME: laravel-otel-worker
@@ -68,13 +68,3 @@ services:
       # a worker's metrics would only be exported on shutdown
       OTEL_METRICS_EXPORTER: none
 
-  otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.130.0
-    command: ["--config=/etc/otelcol/config.yaml"]
-    volumes:
-      - ./otel-collector.yaml:/etc/otelcol/config.yaml:ro
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    environment:
-      # where telemetry finally goes: ELK by default; LGTM :4318, ClickHouse :4338, Loki :4348, SigNoz :4358
-      BACKEND_OTLP_ENDPOINT: ${BACKEND_OTLP_ENDPOINT:-http://host.docker.internal:4328}

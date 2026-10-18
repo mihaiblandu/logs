@@ -4,7 +4,7 @@ Go (`net/http`) version of `../utils` with OpenTelemetry traces, metrics and log
 `otelslog` bridge) over OTLP/HTTP, with the same request context as the other services.
 
 ```bash
-go build -o go-otel . && OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 ./go-otel   # :4250
+go build -o go-otel . && OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4308 ./go-otel   # :4250
 curl -i -H 'X-User-Id: mihai' -H 'X-Request-Id: demo-1' 'localhost:4250/api/echo?message=hi'
 curl -H 'X-User-Id: mihai' 'localhost:4250/api/chain'   # Go -> Django -> .NET -> Laravel -> Spring
 ```

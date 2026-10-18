@@ -1,0 +1,19 @@
+# Shared agent collector: every service (host processes and the Laravel containers) sends OTLP here,
+# and it forwards everything to one backend collector (ELK, LGTM, ClickHouse, Loki, SigNoz).
+#   services --OTLP :4308--> agent collector --OTLP--> backend
+name: otel-agent
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.130.0
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel-collector.yaml:/etc/otelcol/config.yaml:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "4307:4317"   # OTLP gRPC
+      - "4308:4318"   # OTLP HTTP  -> OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4308
+    environment:
+      # where telemetry finally goes: ELK by default; LGTM :4318, ClickHouse :4338, Loki :4348, SigNoz :4358
+      BACKEND_OTLP_ENDPOINT: ${BACKEND_OTLP_ENDPOINT:-http://host.docker.internal:4328}
+    restart: unless-stopped

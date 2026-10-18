@@ -12,7 +12,7 @@ using OpenTelemetry.Trace;
 var builder = WebApplication.CreateBuilder(args);
 
 // Endpoint/protocol come from OTEL_EXPORTER_OTLP_* env vars (see appsettings / launch command);
-// default: http://localhost:4318 (LGTM) over http/protobuf.
+// start-all.sh: the agent collector, http://localhost:4308, over http/protobuf.
 builder.Services.AddOpenTelemetry()
     .ConfigureResource(r => r
         .AddService(serviceName: "dotnet-otel-api", serviceVersion: "1.0.0")
