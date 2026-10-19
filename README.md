@@ -109,20 +109,6 @@ Set at the source (OTel SDK config) and enforced by the ELK collector (`spring-o
 - bodies: JSON only, up to 4 KB; `password`, `token`, `secret`, `access_token` are stored as `"******"`
 - keys without a value are left out
 
-**Traces** - Elasticsearch in the OTel model, data stream `traces-<app>.otel-default` (e.g. `traces-spring.otel-default`;
-span events are not stored there), and **Jaeger** (in-memory, http://localhost:16686, span events included). Resource: `service.name` (`<app>-otel-api`),
-`service.namespace=demo`, `service.version`, `service.instance.id`, `deployment.environment.name=local`,
-`team=observability`, `telemetry.sdk.*`. Stable HTTP semconv.
-
-**Metrics** - Elasticsearch in the OTel model, data stream `metrics-<app>.otel-default`.
-
-**Text search** - `message` is analyzed `text` (full-text: `message:completed`), with `message.keyword` for exact
-match and aggregations; every other string (`context.*`, `tags.*`, bodies) is a `keyword` with a `.text`
-(`match_only_text`) subfield for full-text search.
-
-Kibana data views: `logs` (`*-otel-api-*,*-otel-worker-*`), `otel-traces` (`traces-*.otel-*`), `otel-metrics` (`metrics-*.otel-*`). `./purge-all.sh` deletes all
-telemetry (Elasticsearch + Jaeger).
-
 Tests: `cd e2e && npx playwright test` (199 tests: `/echo` contract, JWT, cascade, telemetry standard,
 log format, Jaeger, UI).
 
