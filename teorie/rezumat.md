@@ -119,18 +119,7 @@ OTEL_RESOURCE_ATTRIBUTES=service.namespace=sfs,service.instance.id=$HOSTNAME,dep
 - TLS pe drum, autentificare și roluri pe indexuri (fiecare echipă / domeniu vede doar ale lui);
 - corpuri doar JSON, maxim 4 KB.
 
-## 10. Retenție
-
-| Fază | Cât | Unde |
-|------|-----|------|
-| hot | 1–7 zile | SSD |
-| warm | 7–30 zile | disc ieftin |
-| arhivă | luni–ani (audit) | snapshot S3 |
-| delete | după politică (ILM / ISM) | — |
-
-Costul îl scazi logând mai puțin: un log per cerere, fără DEBUG, fără câmpuri redundante.
-
-## 11. Checklist
+## 10. Checklist
 
 1. Scrie **formatul** (chei, niveluri, ce nu se loghează) înainte de cod.
 2. **SDK OTel** + bridge de log în fiecare serviciu; middleware care pune contextul și scrie „request completed".
@@ -139,7 +128,7 @@ Costul îl scazi logând mai puțin: un log per cerere, fără DEBUG, fără câ
 5. **Kibana**: data view, căutări salvate, alerte (rata de `ERROR`, 5xx, 401 în rafală, tăcere).
 6. **Teste automate** pe format pentru fiecare serviciu.
 
-## 12. În proiect
+## 11. În proiect
 
 | Ce | Unde |
 |----|------|
